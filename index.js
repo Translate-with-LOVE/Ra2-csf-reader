@@ -103,7 +103,6 @@ function readCSFFile(filePath) {
   let labelOffset = csfFileHeaderSize // 标签块的偏移量
   for (let i = 0; i < numLabels; i++) {
     // 读取标签头
-    // 读取标签头
     const labelHeaderBuffer = Buffer.alloc(csfLabelHeaderSize)
     fs.readSync(fd, labelHeaderBuffer, 0, csfLabelHeaderSize, labelOffset)
     // 解析标签头
@@ -208,5 +207,108 @@ function readCSFFile(filePath) {
   return csfObject
 }
 
+// 写入CSF文件
+function writeCSFFile(csfObject, filePath) {
+  const bufList = []
+  const keys = Object.keys(csfObject)
+
+  // console.log(keys.length)
+
+  // 构建文件头
+  const fileHeaderBuffer = Buffer.alloc(csfFileHeaderSize)
+  // 填充文件头
+  const fileID = ' FSC' // 文件标识符，应为' FSC'
+  const version = 3 // 文件版本，应为3
+  const numLabels = keys.length // 文件中的标签数
+  const numStrings = keys.length // 文件中的字符串对数
+  const languageCode = 9 // 语言代码
+
+  fileHeaderBuffer.write(fileID, 0, 4, 'ascii')
+  fileHeaderBuffer.writeUInt16LE(version, 0x04)
+  fileHeaderBuffer.writeUInt16LE(numLabels, 0x08)
+  fileHeaderBuffer.writeUInt16LE(numStrings, 0x0c)
+  fileHeaderBuffer.writeUInt16LE(languageCode, 0x14)
+  // 填入总Buffer
+  bufList.push(fileHeaderBuffer)
+
+  keys.forEach((label) => {
+    // 负载str对象
+    strObj = csfObject[label]
+    // 构建标签头
+    const labelHeaderBuffer = Buffer.alloc(csfLabelHeaderSize)
+    // 填充标签头
+    const labelID = ' LBL' // 标签的ID，应为' LBL'
+    const numStrings = 1 // 标签下的字符串数，在这里为1
+    const labelNameLength = label.length // 标签的名称长度
+
+    labelHeaderBuffer.write(labelID, 0, 4, 'ascii')
+    labelHeaderBuffer.writeUInt16LE(numStrings, 0x04)
+    labelHeaderBuffer.writeUInt16LE(labelNameLength, 0x08)
+
+    // 构建标签名
+    const labelNameBuffer = Buffer.alloc(labelNameLength)
+    // 填充标签名
+    labelNameBuffer.write(label, 0, label.length, 'ascii')
+    // 填入总Buffer
+    bufList.push(labelHeaderBuffer)
+    bufList.push(labelNameBuffer)
+
+    // 构建字符串头
+    const stringHeaderBuffer = Buffer.alloc(csfStringHeaderSize)
+    // 填充字符串头
+    const stringID = strObj['Extra'] === undefined ? ' RTS' : 'WRTS' // 字符串的ID，应为' RTS'或'WRTS'
+    const stringLength = strObj['Value'].length // 字符串长度
+
+    stringHeaderBuffer.write(stringID, 0, 4, 'ascii')
+    stringHeaderBuffer.writeUInt16LE(stringLength, 0x04)
+
+    // 构建字符串内容
+    const stringContentBuffer = Buffer.alloc(stringLength * 2)
+    stringContentBuffer.write(strObj['Value'], 0, stringLength * 2, 'utf16le')
+
+    for (let i = 0; i < stringContentBuffer.length; i += 2) {
+      let sp = false
+      const testValue =
+        (stringContentBuffer[i + 1] << 8) | stringContentBuffer[i]
+      const testIndex = cp1252_Map.indexOf(testValue)
+      if (testIndex > -1) {
+        stringContentBuffer[i + 1] = 0
+        stringContentBuffer[i] = testIndex + 0x80
+        sp = true
+      }
+      stringContentBuffer[i] = ~stringContentBuffer[i]
+      stringContentBuffer[i + 1] = ~stringContentBuffer[i + 1]
+    }
+
+    // 填入总Buffer
+    bufList.push(stringHeaderBuffer)
+    bufList.push(stringContentBuffer)
+
+    if (stringID === 'WRTS') {
+      // 额外内容
+      const extraValueLengthBuffer = Buffer.alloc(csfStringExtraSize)
+      const extraValueLength = strObj['Extra'].length
+      extraValueLengthBuffer.writeUInt16LE(extraValueLength, 0)
+
+      const extraValueBuffer = Buffer.alloc(extraValueLength)
+      extraValueBuffer.write(strObj['Extra'], 0, extraValueLength, 'ascii')
+
+      bufList.push(extraValueLengthBuffer)
+      bufList.push(extraValueBuffer)
+    }
+  })
+
+  fs.writeFileSync(filePath, Buffer.concat(bufList))
+}
+
 // 调用函数，读取csf文件，输出JSON文件
-fs.writeFileSync(jsonFilePath, JSON.stringify(readCSFFile(csfFilePath)))
+// fs.writeFileSync("ra2.zh_Hant.csf", JSON.stringify(readCSFFile("ra2.zh_Hant.json")))
+// fs.writeFileSync("ra2md.zh_Hant.csf", JSON.stringify(readCSFFile("ra2md.zh_Hant.json")))
+
+// fs.writeFileSync("ra2.en.csf", JSON.stringify(readCSFFile("ra2.en.json")))
+// fs.writeFileSync("ra2md.en.csf", JSON.stringify(readCSFFile("ra2md.en.json")))
+
+// fs.writeFileSync("ra2.zh_Hans.csf", JSON.stringify(readCSFFile("ra2.zh_Hans.json")))
+// fs.writeFileSync("ra2md.zh_Hans.csf", JSON.stringify(readCSFFile("ra2md.zh_Hans.json")))
+
+writeCSFFile(JSON.parse(fs.readFileSync('ra2.zh_Hant.json')), 'ra2.zh_Hant.csf')
